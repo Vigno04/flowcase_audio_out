@@ -19,16 +19,37 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Install dependencies
         run: npm install
 
-      - name: Install pkg globally
-        run: npm install -g pkg
+      - name: Bundle script with ncc
+        run: npx @vercel/ncc build websocket-relay.js -o dist -m
 
-      - name: Build binary
-        run: pkg . --targets node18-linux-${{ matrix.arch }} --output flowcase_audio_out_linux
+      - name: Create SEA Config and Blob
+        run: |
+          echo '{ "main": "dist/index.js", "output": "sea-prep.blob" }' > sea-config.json
+          node --experimental-sea-config sea-config.json
+
+      - name: Download Target Node Binary
+        run: |
+          NODE_VERSION="20.15.1"
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            TAR_ARCH="x64"
+          else
+            TAR_ARCH="arm64"
+          fi
+          wget -q https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${TAR_ARCH}.tar.xz
+          tar -xf node-v${NODE_VERSION}-linux-${TAR_ARCH}.tar.xz
+          cp node-v${NODE_VERSION}-linux-${TAR_ARCH}/bin/node flowcase_audio_out_linux
+
+      - name: Inject SEA Blob
+        run: |
+          npx postject flowcase_audio_out_linux NODE_SEA_BLOB sea-prep.blob \
+            --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 \
+            --macho-segment-name NODE_SEA
+          chmod +x flowcase_audio_out_linux
 
       - name: Package
         run: |
@@ -36,9 +57,9 @@ jobs:
           if [ "$ARCH_NAME" = "x64" ]; then
             ARCH_NAME="amd64"
           fi
-          mkdir -p dist
-          mv flowcase_audio_out_linux dist/
-          cd dist
+          mkdir -p out
+          mv flowcase_audio_out_linux out/
+          cd out
           tar -czvf ../flowcase_audio_out_linux_${ARCH_NAME}.tar.gz flowcase_audio_out_linux
 
       - name: Upload Artifact
